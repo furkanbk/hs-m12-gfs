@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Naranja DFS — Client</title>
+  <style>
+    :root { --orange: #ff7a18; --bg: #1e1e22; --card: #2a2a30; --ok: #34c759; --err: #ff453a; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: #eee; margin: 0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      background: var(--card); border-radius: 14px; padding: 32px;
+      width: 100%; max-width: 520px; box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    }
+    h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    h1 span { color: var(--orange); }
+    p.sub { margin: 0 0 24px; color: #aaa; font-size: .9rem; }
+    input[type=file] {
+      width: 100%; padding: 14px; border: 2px dashed #555; border-radius: 10px;
+      background: #222; color: #ccc; cursor: pointer; margin-bottom: 16px;
+    }
+    button {
+      width: 100%; padding: 14px; border: 0; border-radius: 10px;
+      background: var(--orange); color: #1a1a1a; font-weight: 700; font-size: 1rem;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #result { margin-top: 20px; font-size: .9rem; white-space: pre-wrap; }
+    #result.ok { color: var(--ok); }
+    #result.err { color: var(--err); }
+    .meta { color: #ccc; background: #222; border-radius: 8px; padding: 12px; margin-top: 12px; }
+    .meta b { color: var(--orange); }
+    code { color: #ffcf99; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1><span>Naranja</span> DFS</h1>
+    <p class="sub">Upload a <code>.txt</code> file. It is split into 1024-byte chunks,
+      pushed to all replicas, committed via the leader, then registered.</p>
+
+    <input type="file" id="file" accept=".txt,text/plain" />
+    <button id="send">Send</button>
+
+    <div id="result"></div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById("file");
+    const sendBtn = document.getElementById("send");
+    const result = document.getElementById("result");
+
+    sendBtn.addEventListener("click", async () => {
+      const file = fileInput.files[0];
+      result.className = "";
+      if (!file) {
+        result.className = "err";
+        result.textContent = "Please choose a .txt file first.";
+        return;
+      }
+      if (!file.name.toLowerCase().endsWith(".txt")) {
+        result.className = "err";
+        result.textContent = "Only .txt files are accepted.";
+        return;
+      }
+
+      sendBtn.disabled = true;
+      result.className = "";
+      result.textContent = "Uploading and writing chunks…";
+
+      const form = new FormData();
+      form.append("file", file);
+
+      try {
+        const resp = await fetch("/api/files", { method: "POST", body: form });
+        const data = await resp.json();
+        if (!resp.ok) {
+          throw new Error(data.detail || ("HTTP " + resp.status));
+        }
+        result.className = "ok";
+        result.innerHTML = "✅ <b>File written successfully</b>" +
+          '<div class="meta">' +
+          "<div><b>file_id:</b> " + data.file_id + "</div>" +
+          "<div><b>filename:</b> " + data.filename + "</div>" +
+          "<div><b>size:</b> " + data.size_bytes + " bytes</div>" +
+          "<div><b>chunks:</b> " + data.num_chunks + "</div>" +
+          "<div><b>replicas hit:</b> " + data.replicas_hit.join(", ") + "</div>" +
+          "</div>";
+      } catch (err) {
+        result.className = "err";
+        result.textContent = "❌ Failed: " + err.message;
+      } finally {
+        sendBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
