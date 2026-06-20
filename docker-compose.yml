@@ -1,0 +1,84 @@
+services:
+  nameserver:
+    build: ./nameserver
+    container_name: naranja-nameserver
+    environment:
+      STORAGE_REPLICAS: "storage-1:8000,storage-2:8000,storage-3:8000"
+      LEADER: "storage-1:8000"
+    networks: [naranja]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  storage-1:
+    build: ./storage
+    container_name: naranja-storage-1
+    environment:
+      SELF_ADDR: "storage-1:8000"
+    volumes:
+      - storage1-data:/data
+    networks: [naranja]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  storage-2:
+    build: ./storage
+    container_name: naranja-storage-2
+    environment:
+      SELF_ADDR: "storage-2:8000"
+    volumes:
+      - storage2-data:/data
+    networks: [naranja]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  storage-3:
+    build: ./storage
+    container_name: naranja-storage-3
+    environment:
+      SELF_ADDR: "storage-3:8000"
+    volumes:
+      - storage3-data:/data
+    networks: [naranja]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  client:
+    build: ./client
+    container_name: naranja-client
+    environment:
+      NAMESERVER_ADDR: "nameserver:8000"
+      CHUNK_SIZE: "1024"
+      REQUEST_TIMEOUT: "10"
+    ports:
+      - "8080:8000"   # client UI on http://localhost:8080
+    depends_on:
+      nameserver:
+        condition: service_healthy
+      storage-1:
+        condition: service_healthy
+      storage-2:
+        condition: service_healthy
+      storage-3:
+        condition: service_healthy
+    networks: [naranja]
+
+networks:
+  naranja:
+    driver: bridge
+
+volumes:
+  storage1-data:
+  storage2-data:
+  storage3-data:

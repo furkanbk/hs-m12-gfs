@@ -1,0 +1,19 @@
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local data / chunks (chunk content lives on the FS at runtime, not in git)
+data/
+*.sqlite
+*.db
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
