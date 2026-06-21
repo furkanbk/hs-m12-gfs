@@ -96,7 +96,7 @@ async def put_data(chunk_id: str, request: Request) -> dict:
 
 @app.post("/chunks/{chunk_id}/commit")
 async def commit(chunk_id: str, req: CommitRequest) -> dict:
-    """Stub: leader commit. Returns success immediately.
+    """Leader commit placeholder for Ivan's replication protocol.
 
     TODO(Ivan): real leader logic — finalize locally, then call
     POST /chunks/{id}/commit-replica on every secondary, wait for ALL acks,
@@ -111,9 +111,9 @@ async def commit(chunk_id: str, req: CommitRequest) -> dict:
 
 @app.post("/chunks/{chunk_id}/commit-replica")
 async def commit_replica(chunk_id: str) -> dict:
-    """Stub: secondary finalize + ack. Returns success immediately.
+    """Secondary commit placeholder for Ivan's replication protocol.
 
-    TODO(Ivan/Shafeen): real secondary finalize, then ack.
+    TODO(Ivan): real secondary finalize, then ack.
     """
     path = chunk_path(chunk_id)
     if not path.exists():
