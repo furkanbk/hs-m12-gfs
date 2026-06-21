@@ -23,11 +23,11 @@
 - [ ] Dockerfile + healthz hardening
 
 ## Shafeen Noor — Storage server (chunk persistence)
-- [ ] Real `PUT /chunks/{id}/data`: write bytes to `/data/{chunk_id}` on disk
-- [ ] `GET /chunks/{id}`: stream chunk bytes back
-- [ ] `DELETE /chunks/{id}`: remove chunk file
-- [ ] Disk layout, fsync/durability, healthz
-- [ ] Dockerfile + volume documentation
+- [x] Real `PUT /chunks/{id}/data`: write bytes to `/data/{chunk_id}` on disk
+- [x] `GET /chunks/{id}`: stream chunk bytes back
+- [x] `DELETE /chunks/{id}`: remove chunk file
+- [x] Disk layout, fsync/durability, healthz
+- [x] Dockerfile + volume documentation
 
 ## Ivan Zhukau — Replication & leader/primary protocol
 - [ ] Real `POST /chunks/{id}/commit` on leader: forward to secondaries, wait for ALL acks
