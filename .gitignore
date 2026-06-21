@@ -17,3 +17,9 @@ data/
 .DS_Store
 .idea/
 .vscode/
+
+.claude/
+__pycache__/
+*.db
+*.db-wal
+*.db-shm
