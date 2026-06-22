@@ -3,8 +3,11 @@ services:
     build: ./nameserver
     container_name: naranja-nameserver
     environment:
-      STORAGE_REPLICAS: "storage-1:8000,storage-2:8000,storage-3:8000"
-      LEADER: "storage-1:8000"
+      STORAGE_SERVERS: "storage-1:8000,storage-2:8000,storage-3:8000"
+      REPLICATION_FACTOR: "3"
+      DB_PATH: "/data/naranja.db"
+    volumes:
+      - nameserver-data:/data
     networks: [naranja]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
@@ -79,6 +82,7 @@ networks:
     driver: bridge
 
 volumes:
+  nameserver-data:
   storage1-data:
   storage2-data:
   storage3-data:
