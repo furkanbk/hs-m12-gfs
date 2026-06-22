@@ -4,7 +4,8 @@ A GFS-inspired distributed file system for text files: files are split into
 1024-byte chunks, replicated across 3 storage servers, indexed by a single
 naming server, and accessed through a client with a web UI.
 
-> Skeleton by Berat. **Mikita finalizes** the README.
+> Skeleton by Berat; finalized by **Mikita** (run/use docs, fault-tolerance
+> summary, testing & CI).
 
 ## Quick start
 
@@ -16,6 +17,31 @@ Then open **http://localhost:8080**, pick a `.txt` file, and click **Send**.
 The client splits it into 1024-byte chunks, pushes each chunk to all 3 storage
 replicas, commits via the leader, and registers the file with the naming server.
 The same page can **Read**, **Get size**, and **Delete** a stored file by name.
+
+> **Port 8080 already in use?** Only the client port is published; override the
+> host port without touching the compose file:
+> `NARANJA_CLIENT_PORT=8088 docker compose up --build` → open `http://localhost:8088`.
+
+### Architecture at a glance
+
+```
+                 ┌──────────────┐   metadata (control plane)   ┌───────────────────┐
+   browser  ───▶ │    client    │ ───────────────────────────▶ │    nameserver     │
+   :8080         │  (web UI +   │   allocate / commit / lookup  │  SQLite metadata  │
+                 │   backend)   │                               │   (the only SPOF) │
+                 └──────┬───────┘                               └───────────────────┘
+                        │ chunk bytes (data plane): push to ALL 3, commit to leader
+                        ▼
+            ┌───────────────┬───────────────┬───────────────┐
+            │   storage-1   │   storage-2   │   storage-3   │   chunk files on /data
+            └───────────────┴───────────────┴───────────────┘   (replication factor 3)
+```
+
+Data flow (moving bytes) is decoupled from control flow (deciding durability):
+the client pushes bytes to all replicas, then sends a single commit to the
+chunk's **leader**, which finalizes the secondaries and waits for their acks.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full flows and the
+canonical API contracts.
 
 ## Components
 
@@ -66,6 +92,38 @@ the next replica, so a file stays readable as long as ≥1 of its 3 replicas is
 up. A **write** retries but does not fall back — it must reach all 3 replicas. A
 **delete** is best-effort and idempotent: unreachable replicas are reported as
 `replicas_failed` rather than failing the whole operation.
+
+## Fault tolerance (summary)
+
+Replication factor 3 with a **strict write policy** buys a clear guarantee, all
+verified end-to-end in [`tests/e2e/`](tests/e2e):
+
+| Scenario | Behaviour |
+| -------- | --------- |
+| 1–2 of 3 storage servers down | **Reads still work** — the client falls back across replicas; a chunk is readable while ≥1 of its 3 replicas is up. |
+| Any storage server down | **Writes fail (by design).** A write must reach all 3 replicas, so no chunk is ever silently committed under-replicated. The system is *readable but not writable* during a degradation. |
+| Naming server restart | **Metadata survives** — it lives in SQLite (WAL) on a named volume, so the server restarts with full state. |
+| Naming server permanently lost (no backup) | **Unrecoverable** — bytes survive on storage but are unreachable by name. This is the system's single point of failure. |
+
+Full analysis (recoverable vs. data-loss failures, replication math, what's out
+of scope and why) is in [`docs/ARCHITECTURE.md` §5](docs/ARCHITECTURE.md#5-fault-tolerance).
+
+## Testing & CI
+
+```bash
+# Storage commit-path unit tests (no Docker)
+cd storage && pip install -r requirements-dev.txt && python -m pytest
+
+# Full end-to-end suite across all 5 services (brings the stack up & down)
+pip install -r tests/e2e/requirements.txt
+NARANJA_CLIENT_PORT=8088 python -m pytest tests/e2e -v   # drop the env var if 8080 is free
+```
+
+The e2e suite covers create/read/size/delete, chunk boundaries, empty + UTF-8
+files, and fault injection (storage nodes down, naming-server restart). Both
+suites run on every push/PR via [GitHub Actions](.github/workflows/ci.yml). See
+[`tests/e2e/README.md`](tests/e2e/README.md) for options (e.g. reusing a running
+stack).
 
 ## Documentation
 

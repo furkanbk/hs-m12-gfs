@@ -1,0 +1,47 @@
+# Naranja DFS — CI (owner: Mikita).
+#
+# Two jobs:
+#   * unit — the storage commit-path unit tests (fast, no Docker).
+#   * e2e  — brings the whole 5-service stack up with docker compose and runs
+#            the end-to-end + fault-tolerance suite against it.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: storage unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install storage dev deps
+        working-directory: storage
+        run: pip install -r requirements-dev.txt
+      - name: Run unit tests
+        working-directory: storage
+        run: python -m pytest -q
+
+  e2e:
+    name: end-to-end (compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install e2e deps
+        run: pip install -r tests/e2e/requirements.txt
+      - name: Run end-to-end suite
+        # The suite brings the stack up (docker compose up --build --wait) and
+        # tears it down. Port 8080 is free on the runner.
+        run: python -m pytest tests/e2e -v
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose -p naranja-e2e logs --tail 200 || true
