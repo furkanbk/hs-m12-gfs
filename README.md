@@ -121,7 +121,8 @@ NARANJA_CLIENT_PORT=8088 python -m pytest tests/e2e -v   # drop the env var if 8
 
 The e2e suite covers create/read/size/delete, chunk boundaries, empty + UTF-8
 files, and fault injection (storage nodes down, naming-server restart). Both
-suites run on every push/PR via [GitHub Actions](.github/workflows/ci.yml). See
+suites run on every pull request and on pushes to `main` via
+[GitHub Actions](.github/workflows/ci.yml). See
 [`tests/e2e/README.md`](tests/e2e/README.md) for options (e.g. reusing a running
 stack).
 

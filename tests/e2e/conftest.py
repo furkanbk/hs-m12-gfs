@@ -101,19 +101,41 @@ def wait_until_serving(url: str = BASE_URL, timeout: float = 60.0) -> None:
     raise RuntimeError(f"stack never served a full round-trip at {url} ({last})")
 
 
+_SESSION_FAILED = False
+
+
+def pytest_runtest_logreport(report):
+    """Remember if any test failed so the stack fixture can dump logs on the
+    way down (the post-yield ``down -v`` would otherwise delete the containers
+    a separate CI log step expects to read)."""
+    global _SESSION_FAILED
+    if report.failed:
+        _SESSION_FAILED = True
+
+
 @pytest.fixture(scope="session", autouse=True)
 def stack():
     """Ensure the 5-service stack is up for the whole session.
 
-    Managed mode brings it up with ``--wait`` (compose blocks on healthchecks)
-    and tears it down with its volumes at the end so runs are reproducible.
+    Managed mode first tears down any leftovers from an interrupted run (so the
+    build/up can't collide on stale containers or volumes), brings the stack up
+    with ``--wait`` (compose blocks on healthchecks), and on the way out dumps
+    container logs if anything failed before removing the stack + its volumes.
     """
     if MANAGE_STACK:
-        compose("up", "-d", "--build", "--wait")
+        compose("down", "-v", check=False)  # clear any leftovers from a prior run
+        up = compose("up", "-d", "--build", "--wait", check=False, capture=True)
+        if up.returncode != 0:
+            raise RuntimeError(
+                f"`docker compose up` failed (rc={up.returncode}):\n"
+                f"{up.stdout}\n{up.stderr}"
+            )
     wait_for_health()
     wait_until_serving()
     yield
     if MANAGE_STACK:
+        if _SESSION_FAILED:
+            compose("logs", "--no-color", "--tail", "200", check=False)
         compose("down", "-v", check=False)
 
 

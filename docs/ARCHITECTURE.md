@@ -53,8 +53,10 @@ There are three roles:
       "leader": "storage-1:8000" }
   ] }
 ```
-*Stub:* generate ids, place every chunk on all 3 storage servers,
-`leader = storage-1:8000`.
+*(implemented — Daryna)* Stateless: generates ids and computes placement,
+persisting nothing. With 3 servers / RF 3 every chunk lands on all 3 distinct
+storage servers; the leader rotates round-robin by chunk index (not always
+`storage-1`).
 
 **`POST /commit`**
 ```json
@@ -65,7 +67,8 @@ There are three roles:
 // response
 { "ok": true }
 ```
-*Stub:* store in an in-memory dict.
+*(implemented — Daryna)* Persists the file → chunk → replica/leader layout to
+SQLite. Duplicate filename → `409`.
 
 **`GET /files/{filename}`** → metadata + chunk locations (chunks ordered by
 index, each with `size_bytes`); `404` if unknown. *(implemented — Daryna)*
@@ -100,7 +103,8 @@ finalize. A secondary only acks a chunk whose bytes it actually holds, else
 **`GET /chunks/{chunk_id}`** → raw bytes from the local chunk file.
 **`DELETE /chunks/{chunk_id}`** → `{ "ok": true, "chunk_id": "...", "deleted": true }`.
 Delete is idempotent, so a missing chunk returns `deleted: false`.
-**`GET /healthz`** → `{ "ok": true }`
+**`GET /healthz`** → `{ "ok": true }` (storage also returns diagnostic
+`self` and `data_dir` fields; consumers should rely only on `ok`).
 
 ## 4. Flows
 
