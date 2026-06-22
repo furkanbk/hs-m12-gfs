@@ -75,7 +75,8 @@ There are three roles:
 ### Storage server (data plane)
 
 **`PUT /chunks/{chunk_id}/data`** — body = raw chunk bytes. Any replica stores
-the bytes. → `{ "ok": true }`. *Stub:* accept and write to `/data/{chunk_id}`.
+the bytes durably as `/data/{chunk_id}` using atomic temp-file replacement and
+fsync. → `{ "ok": true, "chunk_id": "...", "size_bytes": 1024 }`.
 
 **`POST /chunks/{chunk_id}/commit`** — sent **only to the leader** by the client.
 ```json
@@ -91,8 +92,9 @@ The leader finalizes locally, instructs each secondary via
 **`POST /chunks/{chunk_id}/commit-replica`** — leader → secondary internal
 finalize. → ack. *Stub:* ok *(real logic — Ivan/Shafeen)*.
 
-**`GET /chunks/{chunk_id}`** → raw bytes *(scaffold — Shafeen)*
-**`DELETE /chunks/{chunk_id}`** → `{ "ok": true }` *(scaffold — Shafeen)*
+**`GET /chunks/{chunk_id}`** → raw bytes from the local chunk file.
+**`DELETE /chunks/{chunk_id}`** → `{ "ok": true, "chunk_id": "...", "deleted": true }`.
+Delete is idempotent, so a missing chunk returns `deleted: false`.
 **`GET /healthz`** → `{ "ok": true }`
 
 ## 4. Flows

@@ -27,6 +27,13 @@ replicas, commits via the leader, and registers the file with the naming server.
 Internal services talk over the compose network by service name
 (e.g. `storage-1:8000`). Only the client UI is exposed to the host.
 
+Each storage container writes chunk bytes to its own named Docker volume:
+`storage1-data`, `storage2-data`, and `storage3-data`. Chunk files are stored
+under `/data/{chunk_id}` inside the container and are never stored in a database.
+The storage server writes via temp file + atomic replace + fsync, streams chunks
+back with `GET /chunks/{chunk_id}`, and supports idempotent replica deletion with
+`DELETE /chunks/{chunk_id}`.
+
 ## Usage (client operations)
 
 - **Create / Write** — implemented: upload a `.txt` via the UI, or

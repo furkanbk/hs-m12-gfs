@@ -14,20 +14,20 @@
 - [ ] Client-side handling for a replica being unreachable (retry/report)
 
 ## Daryna Karpenko — Naming server (metadata authority)
-- [ ] Replace in-memory store with SQLite (metadata only; never store chunk bytes)
-- [ ] Real `POST /allocate`: replica placement + leader selection
-- [ ] `POST /commit`: persist file → chunk → replica/leader mapping
-- [ ] `GET /files/{filename}` (chunk locations for reads)
-- [ ] `DELETE /files/{filename}` (return chunks to purge, cascade delete metadata)
-- [ ] `GET /files/{filename}/size` (from metadata, no chunk transfer)
-- [ ] Dockerfile + healthz hardening
+- [x] Replace in-memory store with SQLite (metadata only; never store chunk bytes)
+- [x] Real `POST /allocate`: replica placement + leader selection
+- [x] `POST /commit`: persist file → chunk → replica/leader mapping
+- [x] `GET /files/{filename}` (chunk locations for reads)
+- [x] `DELETE /files/{filename}` (return chunks to purge, cascade delete metadata)
+- [x] `GET /files/{filename}/size` (from metadata, no chunk transfer)
+- [x] Dockerfile + healthz hardening
 
 ## Shafeen Noor — Storage server (chunk persistence)
-- [ ] Real `PUT /chunks/{id}/data`: write bytes to `/data/{chunk_id}` on disk
-- [ ] `GET /chunks/{id}`: stream chunk bytes back
-- [ ] `DELETE /chunks/{id}`: remove chunk file
-- [ ] Disk layout, fsync/durability, healthz
-- [ ] Dockerfile + volume documentation
+- [x] Real `PUT /chunks/{id}/data`: write bytes to `/data/{chunk_id}` on disk
+- [x] `GET /chunks/{id}`: stream chunk bytes back
+- [x] `DELETE /chunks/{id}`: remove chunk file
+- [x] Disk layout, fsync/durability, healthz
+- [x] Dockerfile + volume documentation
 
 ## Ivan Zhukau — Replication & leader/primary protocol
 - [x] Real `POST /chunks/{id}/commit` on leader: forward to secondaries, wait for ALL acks
