@@ -1,9 +1,10 @@
 """Naranja DFS — Client service (Berat's part, fully implemented).
 
 A FastAPI app that:
-  * serves a minimal web UI at /  (upload a .txt + Send),
+  * serves a minimal web UI at /  (upload a .txt + Send, then read/size/delete),
   * runs the full Create/Write flow against the naming + storage servers,
-  * scaffolds the Read / Delete / Get-size client flows (TODO markers).
+  * runs the Read / Delete / Get-size client flows against the real naming
+    server, tolerating an unreachable replica (retry, then fall back).
 
 Config comes entirely from environment variables (see nameserver_client and
 storage_client) so docker-compose can wire hostnames — no hardcoded hosts here.
@@ -14,9 +15,9 @@ import logging
 import os
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from . import chunker, nameserver_client, storage_client
 
@@ -137,29 +138,102 @@ async def create_file(file: UploadFile) -> JSONResponse:
     )
 
 
-# --- Scaffold: Read / Delete / Get-size client flows ------------------------
-# These depend on the real naming server (Daryna) and storage read/delete
-# (Shafeen). The UI this session only needs upload + Send.
+# --- Read / Delete / Get-size client flows ----------------------------------
+# These run against the real naming server (Daryna) and storage read/delete
+# (Shafeen/Ivan). Reads and deletes tolerate an unreachable replica.
+
+def _nameserver_http_error(exc: httpx.HTTPStatusError, *, what: str) -> HTTPException:
+    """Translate an upstream naming-server error into a client-facing one.
+
+    A 404 (unknown file) is passed straight through; anything else is reported
+    as a 502 so the UI can tell "no such file" apart from "the cluster is sick".
+    """
+    status = exc.response.status_code
+    if status == 404:
+        return HTTPException(status_code=404, detail="File not found.")
+    return HTTPException(status_code=502, detail=f"{what} failed upstream: HTTP {status}")
+
 
 @app.get("/api/files/{filename}")
 async def read_file(filename: str):
-    """Read flow: look up chunk locations, fetch each chunk, reassemble."""
-    # TODO(Berat): after Daryna's GET /files/{filename} and Shafeen's
-    # GET /chunks/{id} exist: lookup -> fetch each chunk from any replica ->
-    # reassemble in index order using the stored size_bytes.
-    raise HTTPException(status_code=501, detail="Read not implemented yet (Berat, after naming server).")
+    """Read flow: look up chunk locations, fetch each chunk from any reachable
+    replica, reassemble in index order. Returns the file as plain text."""
+    try:
+        meta = await nameserver_client.lookup(filename)
+    except httpx.HTTPStatusError as exc:
+        raise _nameserver_http_error(exc, what="lookup") from exc
+    except Exception as exc:  # noqa: BLE001 — naming server unreachable
+        log.exception("lookup failed")
+        raise HTTPException(status_code=502, detail=f"lookup failed: {exc}") from exc
+
+    chunks = sorted(meta.get("chunks", []), key=lambda c: c["index"])
+    pieces: list[bytes] = []
+    for chunk in chunks:
+        try:
+            data = await storage_client.fetch_chunk_any(chunk["replicas"], chunk["chunk_id"])
+        except storage_client.ReplicaUnavailable as exc:
+            log.error("read failed: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail=f"chunk {chunk['index']} unavailable: {exc}",
+            ) from exc
+        # Trust the stored size_bytes as the source of truth for chunk length.
+        pieces.append(data[: chunk["size_bytes"]])
+
+    body = b"".join(pieces)
+    return Response(
+        content=body,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @app.delete("/api/files/{filename}")
-async def delete_file(filename: str):
-    """Delete flow: ask naming server for chunk ids, then purge replicas."""
-    # TODO(Berat): after Daryna's DELETE /files/{filename} and Shafeen's
-    # DELETE /chunks/{id} exist: delete metadata -> instruct each replica.
-    raise HTTPException(status_code=501, detail="Delete not implemented yet (Berat, after naming server).")
+async def delete_file(filename: str) -> JSONResponse:
+    """Delete flow: drop the metadata (naming server), then purge every replica.
+
+    Storage delete is idempotent and best-effort: if a replica is unreachable we
+    still report success for the file (metadata is gone) but list the replicas
+    that could not be purged so an operator can reclaim the orphaned chunks.
+    """
+    try:
+        result = await nameserver_client.delete(filename)
+    except httpx.HTTPStatusError as exc:
+        raise _nameserver_http_error(exc, what="delete") from exc
+    except Exception as exc:  # noqa: BLE001 — naming server unreachable
+        log.exception("metadata delete failed")
+        raise HTTPException(status_code=502, detail=f"delete failed: {exc}") from exc
+
+    replicas_by_chunk: dict[str, list[str]] = result.get("replicas", {})
+    purged = 0
+    failed: list[dict] = []
+    for chunk_id, replicas in replicas_by_chunk.items():
+        for replica in replicas:
+            if await storage_client.delete_chunk(replica, chunk_id):
+                purged += 1
+            else:
+                failed.append({"chunk_id": chunk_id, "replica": replica})
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "filename": filename,
+            "num_chunks": len(result.get("chunk_ids", [])),
+            "replicas_purged": purged,
+            "replicas_failed": failed,
+        }
+    )
 
 
 @app.get("/api/files/{filename}/size")
-async def file_size(filename: str):
+async def file_size(filename: str) -> JSONResponse:
     """Get-size flow: return size from metadata, no chunk transfer."""
-    # TODO(Berat): after Daryna's GET /files/{filename}/size exists.
-    raise HTTPException(status_code=501, detail="Get-size not implemented yet (Berat, after naming server).")
+    try:
+        result = await nameserver_client.size(filename)
+    except httpx.HTTPStatusError as exc:
+        raise _nameserver_http_error(exc, what="size") from exc
+    except Exception as exc:  # noqa: BLE001 — naming server unreachable
+        log.exception("size lookup failed")
+        raise HTTPException(status_code=502, detail=f"size lookup failed: {exc}") from exc
+
+    return JSONResponse({"filename": filename, "size_bytes": result["size_bytes"]})

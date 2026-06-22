@@ -29,11 +29,25 @@
       cursor: pointer;
     }
     button:disabled { opacity: .5; cursor: not-allowed; }
-    #result { margin-top: 20px; font-size: .9rem; white-space: pre-wrap; }
-    #result.ok { color: var(--ok); }
-    #result.err { color: var(--err); }
+    .row { display: flex; gap: 8px; }
+    .row button { width: auto; flex: 1; }
+    input[type=text] {
+      width: 100%; padding: 12px; border: 2px solid #555; border-radius: 10px;
+      background: #222; color: #eee; margin-bottom: 12px;
+    }
+    .secondary { background: #444; color: #eee; }
+    .danger { background: var(--err); color: #1a1a1a; }
+    hr { border: 0; border-top: 1px solid #3a3a40; margin: 28px 0; }
+    h2 { font-size: 1.1rem; margin: 0 0 12px; }
+    #result, #manageResult { margin-top: 20px; font-size: .9rem; white-space: pre-wrap; }
+    #result.ok, #manageResult.ok { color: var(--ok); }
+    #result.err, #manageResult.err { color: var(--err); }
     .meta { color: #ccc; background: #222; border-radius: 8px; padding: 12px; margin-top: 12px; }
     .meta b { color: var(--orange); }
+    pre.content {
+      background: #222; border-radius: 8px; padding: 12px; margin-top: 12px;
+      max-height: 240px; overflow: auto; color: #ddd; font-size: .85rem;
+    }
     code { color: #ffcf99; }
   </style>
 </head>
@@ -47,6 +61,19 @@
     <button id="send">Send</button>
 
     <div id="result"></div>
+
+    <hr />
+
+    <h2>Manage a stored file</h2>
+    <p class="sub">Look up a file by name to read it back, check its size, or delete it.</p>
+    <input type="text" id="filename" placeholder="notes.txt" />
+    <div class="row">
+      <button id="read" class="secondary">Read</button>
+      <button id="size" class="secondary">Get size</button>
+      <button id="delete" class="danger">Delete</button>
+    </div>
+
+    <div id="manageResult"></div>
   </div>
 
   <script>
@@ -97,6 +124,80 @@
         sendBtn.disabled = false;
       }
     });
+
+    // --- Read / Get-size / Delete -----------------------------------------
+    const filenameInput = document.getElementById("filename");
+    const readBtn = document.getElementById("read");
+    const sizeBtn = document.getElementById("size");
+    const deleteBtn = document.getElementById("delete");
+    const manageResult = document.getElementById("manageResult");
+    const manageButtons = [readBtn, sizeBtn, deleteBtn];
+
+    function currentFilename() {
+      const name = filenameInput.value.trim();
+      if (!name) {
+        manageResult.className = "err";
+        manageResult.textContent = "Enter a filename first.";
+        return null;
+      }
+      return name;
+    }
+
+    async function withManage(label, fn) {
+      const name = currentFilename();
+      if (!name) return;
+      manageButtons.forEach((b) => (b.disabled = true));
+      manageResult.className = "";
+      manageResult.textContent = label + " " + name + "…";
+      try {
+        await fn(name);
+      } catch (err) {
+        manageResult.className = "err";
+        manageResult.textContent = "❌ Failed: " + err.message;
+      } finally {
+        manageButtons.forEach((b) => (b.disabled = false));
+      }
+    }
+
+    readBtn.addEventListener("click", () => withManage("Reading", async (name) => {
+      const resp = await fetch("/api/files/" + encodeURIComponent(name));
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || ("HTTP " + resp.status));
+      }
+      const text = await resp.text();
+      manageResult.className = "ok";
+      manageResult.innerHTML = "✅ <b>Read " + name + "</b> (" + text.length +
+        " chars)<pre class=\"content\"></pre>";
+      manageResult.querySelector("pre.content").textContent = text;
+    }));
+
+    sizeBtn.addEventListener("click", () => withManage("Sizing", async (name) => {
+      const resp = await fetch("/api/files/" + encodeURIComponent(name) + "/size");
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+      manageResult.className = "ok";
+      manageResult.innerHTML = "✅ <b>" + name + "</b>" +
+        '<div class="meta"><div><b>size:</b> ' + data.size_bytes + " bytes</div></div>";
+    }));
+
+    deleteBtn.addEventListener("click", () => withManage("Deleting", async (name) => {
+      const resp = await fetch("/api/files/" + encodeURIComponent(name), { method: "DELETE" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+      const failed = data.replicas_failed || [];
+      manageResult.className = failed.length ? "err" : "ok";
+      let html = (failed.length ? "⚠️ " : "✅ ") + "<b>Deleted " + name + "</b>" +
+        '<div class="meta">' +
+        "<div><b>chunks:</b> " + data.num_chunks + "</div>" +
+        "<div><b>replicas purged:</b> " + data.replicas_purged + "</div>";
+      if (failed.length) {
+        html += "<div><b>could not purge:</b> " +
+          failed.map((f) => f.replica + " (" + f.chunk_id.slice(0, 8) + "…)").join(", ") +
+          "</div>";
+      }
+      manageResult.innerHTML = html + "</div>";
+    }));
   </script>
 </body>
 </html>

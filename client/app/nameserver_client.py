@@ -50,28 +50,34 @@ async def commit(file_id: str, filename: str, size_bytes: int, chunks: list[dict
         return resp.json()
 
 
-# --- Scaffold: depend on Daryna's real naming server ------------------------
+# --- Read / Delete / Size control plane (naming server /files/{filename}) ----
 
 async def lookup(filename: str) -> dict:
-    """Fetch metadata + chunk locations for a file (used by the Read flow)."""
-    # TODO(Daryna): implement GET /files/{filename} on the naming server,
-    # then wire this up. Returns chunk locations in index order.
-    raise NotImplementedError(
-        "lookup() needs the real naming server GET /files/{filename} (owner: Daryna)"
-    )
+    """Fetch metadata + chunk locations for a file (used by the Read flow).
+
+    Returns ``{file_id, filename, size_bytes, chunks: [{chunk_id, index,
+    replicas, leader, size_bytes}, ...]}`` with chunks ordered by index.
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(f"{_base_url()}/files/{filename}")
+        resp.raise_for_status()
+        return resp.json()
 
 
 async def delete(filename: str) -> dict:
-    """Delete a file's metadata; returns chunk_ids + replicas to purge."""
-    # TODO(Daryna): implement DELETE /files/{filename} on the naming server.
-    raise NotImplementedError(
-        "delete() needs the real naming server DELETE /files/{filename} (owner: Daryna)"
-    )
+    """Delete a file's metadata; returns ``{chunk_ids, replicas}`` to purge.
+
+    ``replicas`` maps each chunk_id to the list of storage addresses holding it.
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.delete(f"{_base_url()}/files/{filename}")
+        resp.raise_for_status()
+        return resp.json()
 
 
 async def size(filename: str) -> dict:
-    """Return the file size from metadata (no chunk transfer)."""
-    # TODO(Daryna): implement GET /files/{filename}/size on the naming server.
-    raise NotImplementedError(
-        "size() needs the real naming server GET /files/{filename}/size (owner: Daryna)"
-    )
+    """Return ``{size_bytes}`` from metadata (no chunk transfer)."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(f"{_base_url()}/files/{filename}/size")
+        resp.raise_for_status()
+        return resp.json()
