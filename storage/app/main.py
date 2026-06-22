@@ -4,13 +4,13 @@ One image, run x3 via docker-compose. Each container stores only its own chunks
 as individual files under /data (a named docker volume) — chunk content lives on
 the Linux filesystem, never in a database.
 
-Chunk data is persisted with atomic replace + fsync so a process/container
-restart with an intact Docker volume can still serve previously written chunks.
-Ivan owns the leader -> secondary commit coordination; those endpoints remain
-protocol stubs here.
+Disk persistence (read/delete) is owned by Shafeen; the leader -> secondary
+commit/ack protocol is owned by Ivan and now lives in ``replication.py``. See
+the TODO markers and docs/TASKS.md.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
@@ -19,6 +19,10 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+from . import replication
+
+log = logging.getLogger("storage")
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -96,28 +100,42 @@ async def put_data(chunk_id: str, request: Request) -> dict:
 
 @app.post("/chunks/{chunk_id}/commit")
 async def commit(chunk_id: str, req: CommitRequest) -> dict:
-    """Leader commit placeholder for Ivan's replication protocol.
+    """Leader commit (owner: Ivan). Sent ONLY to the leader by the client.
 
-    TODO(Ivan): real leader logic — finalize locally, then call
-    POST /chunks/{id}/commit-replica on every secondary, wait for ALL acks,
-    and only then return success. Define how many simultaneous failures we
-    survive and enforce it here.
+    Finalizes the chunk locally, drives every secondary to finalize via
+    ``commit-replica``, waits for their acks, and enforces the write policy
+    (see ``replication.WRITE_MIN_REPLICAS``). Returns the contract shape
+    ``{"ok": true, "acked": [...]}`` on success; on insufficient acks it fails
+    with HTTP 503 so the client surfaces a clear, retryable error rather than
+    treating an under-replicated chunk as durable.
     """
-    path = chunk_path(chunk_id)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Chunk data not found.")
-    return {"ok": True, "acked": [SELF_ADDR, *req.secondaries]}
+    if not replication.is_valid_chunk_id(chunk_id):
+        raise HTTPException(status_code=400, detail=f"invalid chunk_id: {chunk_id!r}")
+    outcome = await replication.leader_commit(
+        self_addr=SELF_ADDR,
+        chunk_id=chunk_id,
+        secondaries=req.secondaries,
+        data_dir=DATA_DIR,
+    )
+    if not outcome.ok:
+        log.error("commit refused for chunk %s: %s", chunk_id, outcome.reason())
+        raise HTTPException(status_code=503, detail=outcome.reason())
+    return {"ok": True, "acked": list(outcome.acked)}
 
 
 @app.post("/chunks/{chunk_id}/commit-replica")
 async def commit_replica(chunk_id: str) -> dict:
-    """Secondary commit placeholder for Ivan's replication protocol.
+    """Secondary finalize + ack (owner: Ivan). Internal: leader -> secondary.
 
-    TODO(Ivan): real secondary finalize, then ack.
+    A secondary can only ack a chunk whose bytes it actually holds (pushed by
+    the data plane). If the data is missing, refuse with HTTP 409 so the leader
+    counts this replica as failed instead of recording a phantom ack.
     """
-    path = chunk_path(chunk_id)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Chunk data not found.")
+    if not replication.is_valid_chunk_id(chunk_id):
+        raise HTTPException(status_code=400, detail=f"invalid chunk_id: {chunk_id!r}")
+    if not replication.chunk_present(DATA_DIR, chunk_id):
+        log.warning("secondary %s missing data for chunk %s; declining", SELF_ADDR, chunk_id)
+        raise HTTPException(status_code=409, detail=f"chunk {chunk_id} not present on {SELF_ADDR}")
     return {"ok": True, "acked": SELF_ADDR}
 
 

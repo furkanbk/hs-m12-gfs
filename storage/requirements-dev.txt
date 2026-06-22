@@ -1,0 +1,3 @@
+# Dev/test deps for the storage server (commit-path tests, owner: Ivan).
+-r requirements.txt
+pytest==8.2.0

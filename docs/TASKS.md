@@ -30,11 +30,11 @@
 - [x] Dockerfile + volume documentation
 
 ## Ivan Zhukau — Replication & leader/primary protocol
-- [ ] Real `POST /chunks/{id}/commit` on leader: forward to secondaries, wait for ALL acks
-- [ ] `POST /chunks/{id}/commit-replica`: secondary finalize + ack
-- [ ] Failure handling: what happens when a secondary is down during a write
-- [ ] Define "how many simultaneous failures we survive" and enforce it
-- [ ] Coordinate the client↔storage contract with Berat and Shafeen
+- [x] Real `POST /chunks/{id}/commit` on leader: forward to secondaries, wait for ALL acks
+- [x] `POST /chunks/{id}/commit-replica`: secondary finalize + ack
+- [x] Failure handling: what happens when a secondary is down during a write
+- [x] Define "how many simultaneous failures we survive" and enforce it (`WRITE_MIN_REPLICAS`; see `storage/REPLICATION.md`)
+- [x] Coordinate the client↔storage contract with Berat and Shafeen (contract unchanged; notes for Mikita/Shafeen in `storage/REPLICATION.md`)
 
 ## Mikita Voitsik — Integration, DevOps & documentation
 - [ ] Finalize docker-compose (volumes, network, ports, env, healthchecks)
