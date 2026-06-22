@@ -9,9 +9,9 @@
 - [x] Client UI (upload .txt + Send) and client FastAPI backend
 - [x] 1024-byte chunker
 - [x] Create/Write flow: push data to all replicas → commit to leader → register with nameserver
-- [ ] Client side of Read (reassemble from replicas) — after naming server is real
-- [ ] Client side of Delete and Get-size — after naming server is real
-- [ ] Client-side handling for a replica being unreachable (retry/report)
+- [x] Client side of Read (reassemble from replicas) — after naming server is real
+- [x] Client side of Delete and Get-size — after naming server is real
+- [x] Client-side handling for a replica being unreachable (retry/report)
 
 ## Daryna Karpenko — Naming server (metadata authority)
 - [x] Replace in-memory store with SQLite (metadata only; never store chunk bytes)

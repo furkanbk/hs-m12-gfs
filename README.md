@@ -15,6 +15,7 @@ docker compose up --build
 Then open **http://localhost:8080**, pick a `.txt` file, and click **Send**.
 The client splits it into 1024-byte chunks, pushes each chunk to all 3 storage
 replicas, commits via the leader, and registers the file with the naming server.
+The same page can **Read**, **Get size**, and **Delete** a stored file by name.
 
 ## Components
 
@@ -36,11 +37,35 @@ back with `GET /chunks/{chunk_id}`, and supports idempotent replica deletion wit
 
 ## Usage (client operations)
 
-- **Create / Write** — implemented: upload a `.txt` via the UI, or
-  `POST /api/files` (multipart `file`).
-- **Read** — *stub* (`GET /api/files/{filename}`), pending the real naming server.
-- **Delete** — *stub* (`DELETE /api/files/{filename}`), pending the real naming server.
-- **Get size** — *stub* (`GET /api/files/{filename}/size`), pending the real naming server.
+All client operations are implemented end-to-end against the real naming and
+storage servers:
+
+- **Create / Write** — upload a `.txt` via the UI, or `POST /api/files`
+  (multipart `file`). Returns `file_id`, chunk count, and replicas hit.
+- **Read** — `GET /api/files/{filename}`: looks up chunk locations, fetches each
+  chunk from any reachable replica, and reassembles the file in index order.
+- **Delete** — `DELETE /api/files/{filename}`: drops the metadata, then purges
+  every replica. Reports `replicas_purged` and any `replicas_failed`.
+- **Get size** — `GET /api/files/{filename}/size`: size from metadata only, no
+  chunk transfer.
+
+```bash
+# Create
+curl -F "file=@notes.txt" http://localhost:8080/api/files
+# Read (reassembled file to stdout)
+curl http://localhost:8080/api/files/notes.txt
+# Get size
+curl http://localhost:8080/api/files/notes.txt/size
+# Delete
+curl -X DELETE http://localhost:8080/api/files/notes.txt
+```
+
+**Replica unreachable (retry / report).** Transient failures
+(connection/timeout/5xx) are retried with backoff. A **read** then falls back to
+the next replica, so a file stays readable as long as ≥1 of its 3 replicas is
+up. A **write** retries but does not fall back — it must reach all 3 replicas. A
+**delete** is best-effort and idempotent: unreachable replicas are reported as
+`replicas_failed` rather than failing the whole operation.
 
 ## Documentation
 

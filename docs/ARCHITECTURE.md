@@ -67,9 +67,11 @@ There are three roles:
 ```
 *Stub:* store in an in-memory dict.
 
-**`GET /files/{filename}`** → metadata + chunk locations *(scaffold — Daryna)*
-**`DELETE /files/{filename}`** → `{ "chunk_ids": [...], "replicas": {...} }` *(scaffold — Daryna)*
-**`GET /files/{filename}/size`** → `{ "size_bytes": 5120 }` *(scaffold — Daryna)*
+**`GET /files/{filename}`** → metadata + chunk locations (chunks ordered by
+index, each with `size_bytes`); `404` if unknown. *(implemented — Daryna)*
+**`DELETE /files/{filename}`** → `{ "chunk_ids": [...], "replicas": {chunk_id: [addr, ...]} }`;
+cascade-deletes metadata; `404` if unknown. *(implemented — Daryna)*
+**`GET /files/{filename}/size`** → `{ "size_bytes": 5120 }`; `404` if unknown. *(implemented — Daryna)*
 **`GET /healthz`** → `{ "ok": true }`
 
 ### Storage server (data plane)
@@ -87,10 +89,13 @@ fsync. → `{ "ok": true, "chunk_id": "...", "size_bytes": 1024 }`.
 ```
 The leader finalizes locally, instructs each secondary via
 `POST /chunks/{id}/commit-replica`, **waits for ALL acks**, then returns success.
-*Stub:* returns ok immediately *(real logic — Ivan)*.
+On insufficient acks it fails with `503` so the client surfaces a retryable
+error rather than treating an under-replicated chunk as durable.
+*(implemented — Ivan; see `storage/REPLICATION.md`)*
 
 **`POST /chunks/{chunk_id}/commit-replica`** — leader → secondary internal
-finalize. → ack. *Stub:* ok *(real logic — Ivan/Shafeen)*.
+finalize. A secondary only acks a chunk whose bytes it actually holds, else
+`409`. → ack. *(implemented — Ivan/Shafeen)*.
 
 **`GET /chunks/{chunk_id}`** → raw bytes from the local chunk file.
 **`DELETE /chunks/{chunk_id}`** → `{ "ok": true, "chunk_id": "...", "deleted": true }`.
@@ -115,18 +120,33 @@ GFS decouples **data flow** from **control flow**:
 6. After all chunks commit, client → naming server `POST /commit` registers the
    file → chunk → locations mapping.
 
-### Read *(scaffold)*
+### Read *(implemented in the client)*
 Client → naming server `GET /files/{filename}` for chunk locations → fetch each
-chunk from any replica → reassemble in index order using each chunk's
-`size_bytes`.
+chunk from any **reachable** replica → reassemble in index order using each
+chunk's `size_bytes`. For every chunk the client tries the replicas in order,
+retrying transient failures, and **falls back to the next replica** if one is
+down; a chunk only fails the read when *all* its replicas are unreachable. The
+reassembled file is returned as `text/plain`.
 
-### Delete *(scaffold)*
+### Delete *(implemented in the client)*
 Client → naming server `DELETE /files/{filename}` (returns chunk ids + replicas)
-→ client (or naming server) instructs storage servers to delete replicas.
+→ client instructs each storage server to delete its replica. Delete is
+**best-effort and idempotent**: the metadata is gone once the naming server
+responds, so unreachable replicas are reported back to the caller
+(`replicas_failed`, i.e. orphaned chunks to reclaim later) rather than failing
+the operation.
 
-### Get size *(scaffold)*
+### Get size *(implemented in the client)*
 Client → naming server `GET /files/{filename}/size` → size from metadata, no
 chunk transfer.
+
+### Client failure handling (retry / report)
+Inter-service calls retry transient failures (connection errors, timeouts, 5xx)
+with backoff before giving up; 4xx responses are not retried. **Writes** retry
+each replica but never fall back — a write must reach all 3 replicas (RF 3).
+**Reads** fall back across replicas as above. **Deletes** report unreachable
+replicas instead of failing. Retry counts/backoff are env-tunable
+(`STORAGE_RETRY_ATTEMPTS`, `STORAGE_RETRY_BACKOFF`).
 
 ## 5. Fault tolerance — to be completed (owner: Mikita)
 
