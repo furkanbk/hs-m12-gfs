@@ -1,71 +1,126 @@
+# Naranja DFS — service orchestration (owner: Mikita).
+#
+# Five services, three roles:
+#   * nameserver        — metadata authority (SQLite on a named volume).
+#   * storage-1/2/3     — chunk bytes on the Linux FS (one named volume each).
+#   * client            — web UI + backend; the ONLY service exposed to the host.
+#
+# Run:    docker compose up --build      → open http://localhost:8080
+# See:    README.md, docs/ARCHITECTURE.md (API contracts + fault tolerance).
+#
+# Containers are named by Compose as <project>-<service> (project defaults to the
+# repo directory). We deliberately do NOT pin container_name, so several isolated
+# stacks can coexist (e.g. `docker compose -p naranja-e2e up`, used by the tests).
+# Address services by name anyway: `docker compose logs storage-1`.
+#
+# The blocks below (x-*) are reusable YAML anchors, merged into each service so
+# the hardening lives in exactly one place.
+
+# --- liveness probe (every service serves GET /healthz on :8000) --------------
+x-healthcheck: &healthz
+  test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)"]
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 10s
+
+# --- container hardening (applied to every service) ---------------------------
+# read_only root FS + a writable /tmp tmpfs (uploads spill here) + the per-service
+# /data volume mounted rw. cap_drop ALL + no-new-privileges: the apps need no
+# Linux capabilities and must never gain privileges. restart: unless-stopped is
+# our recoverable-failure story — a crashed process comes back with its volume
+# intact (see docs/ARCHITECTURE.md §5).
+x-hardening: &hardening
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 10s
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  mem_limit: 256m
+  pids_limit: 256
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# --- python runtime env (unbuffered logs; no .pyc writes on the read-only FS) --
+x-pyenv: &pyenv
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
 services:
   nameserver:
+    <<: *hardening
     build: ./nameserver
-    container_name: naranja-nameserver
     environment:
+      <<: *pyenv
       STORAGE_SERVERS: "storage-1:8000,storage-2:8000,storage-3:8000"
       REPLICATION_FACTOR: "3"
       DB_PATH: "/data/naranja.db"
     volumes:
       - nameserver-data:/data
     networks: [naranja]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+    healthcheck: *healthz
 
   storage-1:
+    <<: *hardening
     build: ./storage
-    container_name: naranja-storage-1
     environment:
+      <<: *pyenv
       SELF_ADDR: "storage-1:8000"
+      # Strict write durability: 0 == "all replicas must finalize". Every
+      # committed chunk is guaranteed to have all 3 copies, which is exactly what
+      # lets the read path survive up to 2 storage failures. There is no
+      # background re-replication, so this strict default is the safe choice.
+      # (See docs/ARCHITECTURE.md §5 and storage/REPLICATION.md.)
+      WRITE_MIN_REPLICAS: "0"
     volumes:
       - storage1-data:/data
     networks: [naranja]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+    healthcheck: *healthz
 
   storage-2:
+    <<: *hardening
     build: ./storage
-    container_name: naranja-storage-2
     environment:
+      <<: *pyenv
       SELF_ADDR: "storage-2:8000"
+      WRITE_MIN_REPLICAS: "0"   # strict: all replicas (see storage-1 note)
     volumes:
       - storage2-data:/data
     networks: [naranja]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+    healthcheck: *healthz
 
   storage-3:
+    <<: *hardening
     build: ./storage
-    container_name: naranja-storage-3
     environment:
+      <<: *pyenv
       SELF_ADDR: "storage-3:8000"
+      WRITE_MIN_REPLICAS: "0"   # strict: all replicas (see storage-1 note)
     volumes:
       - storage3-data:/data
     networks: [naranja]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+    healthcheck: *healthz
 
   client:
+    <<: *hardening
     build: ./client
-    container_name: naranja-client
     environment:
+      <<: *pyenv
       NAMESERVER_ADDR: "nameserver:8000"
       CHUNK_SIZE: "1024"
       REQUEST_TIMEOUT: "10"
     ports:
-      - "8080:8000"   # client UI on http://localhost:8080
+      # Only the client UI is published. Override the host port with
+      # NARANJA_CLIENT_PORT (e.g. to run an isolated second stack).
+      - "${NARANJA_CLIENT_PORT:-8080}:8000"
     depends_on:
       nameserver:
         condition: service_healthy
@@ -76,6 +131,7 @@ services:
       storage-3:
         condition: service_healthy
     networks: [naranja]
+    healthcheck: *healthz
 
 networks:
   naranja:

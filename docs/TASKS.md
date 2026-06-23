@@ -37,10 +37,14 @@
 - [x] Coordinate the client↔storage contract with Berat and Shafeen (contract unchanged; notes for Mikita/Shafeen in `storage/REPLICATION.md`)
 
 ## Mikita Voitsik — Integration, DevOps & documentation
-- [ ] Finalize docker-compose (volumes, network, ports, env, healthchecks)
-- [ ] README: how to run (compose, ports) + how to use (client ops with examples)
-- [ ] Architecture document: finalize, including full **fault-tolerance analysis**
+- [x] Finalize docker-compose (volumes, network, ports, env, healthchecks) —
+      hardened: read-only rootfs + tmpfs, `cap_drop: ALL`, `no-new-privileges`,
+      `restart: unless-stopped`, mem/pids limits, log rotation, client healthcheck,
+      `NARANJA_CLIENT_PORT` override
+- [x] README: how to run (compose, ports) + how to use (client ops with examples)
+- [x] Architecture document: finalize, including full **fault-tolerance analysis**
       (storage server down? naming server = single point of failure? recoverable
-      vs data-loss failures? how many simultaneous failures survivable?)
-- [ ] End-to-end integration tests across all 5 services
-- [ ] Optional CI
+      vs data-loss failures? how many simultaneous failures survivable?) — see §5
+- [x] End-to-end integration tests across all 5 services — `tests/e2e/` (15 tests,
+      incl. fault injection); all green
+- [x] Optional CI — `.github/workflows/ci.yml` (unit + e2e on every push/PR)
